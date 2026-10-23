@@ -1,0 +1,188 @@
+package serve
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/provider"
+)
+
+// Generation runs on the filler's goroutines, so the recorder is shared.
+type recordingTitleProvider struct {
+	mu       sync.Mutex
+	requests []provider.Request
+}
+
+func (p *recordingTitleProvider) Name() string { return "recording-title" }
+
+func (p *recordingTitleProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	p.requests = append(p.requests, req)
+	p.mu.Unlock()
+	ch := make(chan provider.Chunk, 2)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: req.Messages[len(req.Messages)-1].Content}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+func (p *recordingTitleProvider) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.requests)
+}
+
+func (p *recordingTitleProvider) at(i int) provider.Request {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.requests[i]
+}
+
+// waitTitle blocks until the scheduled generation has reached the cache.
+func waitTitle(t *testing.T, s *Server, name, source string, mod int64) string {
+	t.Helper()
+	for range 200 {
+		if got, ok := s.titles.get(name, source, mod); ok {
+			return got
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("title for %q never reached the cache", name)
+	return ""
+}
+
+func TestGenerateTitleStripsPasteLabelAndUsesTitleBudget(t *testing.T) {
+	prov := &recordingTitleProvider{}
+	s := &Server{titleModel: titleProviderState{prov: prov}}
+	got := s.generateTitle(context.Background(), "[已粘贴文本 #1 · 20 行]\nfix the login loop")
+	if got != "fix the login loop" {
+		t.Fatalf("title = %q, want pasted label removed", got)
+	}
+	if prov.count() != 1 {
+		t.Fatalf("requests = %d, want 1", prov.count())
+	}
+	req := prov.at(0)
+	if req.MaxTokens != 60 || req.Temperature == nil || *req.Temperature != 0 {
+		t.Fatalf("title budget = %+v, want 60 tokens and temperature 0", req)
+	}
+	if req.Messages[0].Content != titlePrompt || req.Messages[1].Content != "fix the login loop" {
+		t.Fatalf("title messages = %+v", req.Messages)
+	}
+}
+
+func TestSessionTitleCachesByFirstMessageAcrossMtimeChanges(t *testing.T) {
+	dir := testenv.TempDir(t)
+	prov := &recordingTitleProvider{}
+	s := &Server{titleModel: titleProviderState{prov: prov}, titles: newTitleCache(dir), fill: newTitleFiller()}
+
+	if got := s.sessionTitle("a.jsonl", "first prompt", 100, ""); got != "first prompt" {
+		t.Fatalf("first title = %q", got)
+	}
+	waitTitle(t, s, "a.jsonl", "first prompt", 100)
+
+	if got := s.sessionTitle("a.jsonl", "first prompt", 200, ""); got != "first prompt" {
+		t.Fatalf("title after append = %q", got)
+	}
+	if prov.count() != 1 {
+		t.Fatalf("requests after mtime-only change = %d, want 1", prov.count())
+	}
+
+	if got := s.sessionTitle("a.jsonl", "replacement prompt", 300, ""); got != "replacement prompt" {
+		t.Fatalf("title after replacing first turn = %q", got)
+	}
+	waitTitle(t, s, "a.jsonl", "replacement prompt", 300)
+	if prov.count() != 2 {
+		t.Fatalf("requests after replacing first turn = %d, want 2", prov.count())
+	}
+
+	freshProv := &recordingTitleProvider{}
+	fresh := &Server{titleModel: titleProviderState{prov: freshProv}, titles: newTitleCache(dir), fill: newTitleFiller()}
+	if got := fresh.sessionTitle("a.jsonl", "replacement prompt", 400, ""); got != "replacement prompt" {
+		t.Fatalf("persisted title = %q", got)
+	}
+	if freshProv.count() != 0 {
+		t.Fatalf("fresh server regenerated persisted title %d time(s)", freshProv.count())
+	}
+}
+
+// The list request is the thing that used to block; it must now return without
+// waiting on the provider at all.
+func TestSessionTitleDoesNotBlockOnGeneration(t *testing.T) {
+	release := make(chan struct{})
+	prov := &blockingTitleProvider{release: release}
+	s := &Server{titleModel: titleProviderState{prov: prov}, titles: newTitleCache(testenv.TempDir(t)), fill: newTitleFiller()}
+
+	done := make(chan string, 1)
+	go func() { done <- s.sessionTitle("a.jsonl", "slow prompt", 100, "") }()
+
+	select {
+	case got := <-done:
+		if got != "slow prompt" {
+			t.Fatalf("title = %q, want the preview", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sessionTitle blocked on the provider")
+	}
+	close(release)
+}
+
+type blockingTitleProvider struct{ release chan struct{} }
+
+func (p *blockingTitleProvider) Name() string { return "blocking-title" }
+
+func (p *blockingTitleProvider) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	<-p.release
+	ch := make(chan provider.Chunk)
+	close(ch)
+	return ch, nil
+}
+
+func TestPreviewTitleStripsOnlyLeadingPasteLabel(t *testing.T) {
+	if got := previewTitle("[Pasted text #2 · 42 lines]\nfunc foo() { return 1 }"); got != "func foo() { return 1 }" {
+		t.Fatalf("previewTitle = %q", got)
+	}
+	const inline = "Explain [Pasted text #2 · 42 lines] handling"
+	if got := previewTitle(inline); got != inline {
+		t.Fatalf("inline label changed to %q", got)
+	}
+}
+
+// gatedTitleProvider holds its first request until released, so a test can ask
+// for a second title while the first generation is still running.
+type gatedTitleProvider struct {
+	recordingTitleProvider
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (p *gatedTitleProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.once.Do(func() {
+		close(p.entered)
+		<-p.release
+	})
+	return p.recordingTitleProvider.Stream(ctx, req)
+}
+
+// A request for a different first message must not be taken for the one already
+// being generated: dropping it leaves the session showing a stale title until
+// some later list happens to ask again.
+func TestSessionTitleForNewSourceIsNotDroppedWhileTheOldOneGenerates(t *testing.T) {
+	prov := &gatedTitleProvider{entered: make(chan struct{}), release: make(chan struct{})}
+	s := &Server{titleModel: titleProviderState{prov: prov}, titles: newTitleCache(testenv.TempDir(t)), fill: newTitleFiller()}
+
+	s.sessionTitle("a.jsonl", "first prompt", 100, "")
+	<-prov.entered
+	if got := s.sessionTitle("a.jsonl", "replacement prompt", 300, ""); got != "replacement prompt" {
+		t.Fatalf("preview = %q", got)
+	}
+	close(prov.release)
+
+	waitTitle(t, s, "a.jsonl", "replacement prompt", 300)
+	if prov.count() != 2 {
+		t.Fatalf("generations = %d, want 2: the replacement was dropped as a duplicate of the first", prov.count())
+	}
+}

@@ -1,0 +1,385 @@
+package writeclaim
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"reasonix/internal/base/testenv"
+	"reasonix/internal/contract/agentgraph"
+)
+
+func TestSchedulerTotalConcurrencyQueues(t *testing.T) {
+	s := NewSubagentScheduler(2, 2)
+	root := testenv.TempDir(t)
+	var started atomic.Int32
+	var max atomic.Int32
+	var wg sync.WaitGroup
+	barrier := make(chan struct{})
+
+	for range 4 {
+		wg.Go(func() {
+			release, err := s.Acquire(context.Background(), AcquireRequest{Writer: false})
+			if err != nil {
+				t.Errorf("acquire: %v", err)
+				return
+			}
+			cur := started.Add(1)
+			for {
+				old := max.Load()
+				if cur <= old || max.CompareAndSwap(old, cur) {
+					break
+				}
+			}
+			<-barrier
+			started.Add(-1)
+			release()
+		})
+	}
+
+	// Wait until at least 2 are running, then release them.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if max.Load() >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := max.Load(); got > 2 {
+		t.Fatalf("max concurrent = %d, want <= 2", got)
+	}
+	close(barrier)
+	wg.Wait()
+	_ = root
+}
+
+func TestSchedulerNestedFailsFast(t *testing.T) {
+	s := NewSubagentScheduler(1, 1)
+	release, err := s.Acquire(context.Background(), AcquireRequest{Writer: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	_, err = s.Acquire(context.Background(), AcquireRequest{Writer: false, Nested: true})
+	if err == nil {
+		t.Fatal("nested acquire should fail fast at limit")
+	}
+}
+
+func TestSchedulerWriterPathConflictQueues(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := testenv.TempDir(t)
+	claim, err := NormalizeWritePaths(root, []string{"a.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.Acquire(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	// Same path cannot start while the first claim is held — with Nested it fails.
+	_, err = s.Acquire(ctx, AcquireRequest{Writer: true, WritePaths: claim, Nested: true})
+	if err == nil {
+		t.Fatal("expected path conflict for nested acquire")
+	}
+	release()
+
+	// After release, same path is free.
+	release2, err := s.Acquire(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	release2()
+}
+
+func TestSchedulerTryClaimWritePaths(t *testing.T) {
+	s := NewSubagentScheduler(4, 2)
+	root := testenv.TempDir(t)
+	claim, _ := NormalizeWritePaths(root, []string{"a.md"})
+	release, err := s.Acquire(context.Background(), AcquireRequest{Writer: true, WritePaths: claim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if err := s.TryClaimWritePaths(claim); err == nil {
+		t.Fatal("parent should see active claim")
+	}
+	other, _ := NormalizeWritePaths(root, []string{"b.md"})
+	if err := s.TryClaimWritePaths(other); err != nil {
+		t.Fatalf("disjoint claim should be free: %v", err)
+	}
+}
+
+// waitForQueuedAcquires blocks until exactly want acquires are parked in the
+// queue, so a test can prove which one a freed slot goes to instead of racing
+// the goroutines that ask for it.
+func waitForQueuedAcquires(t *testing.T, s *SubagentScheduler, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if s.Queued() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("waited for %d queued acquires and never saw them", want)
+}
+
+// A slot used to go to whoever asked first, which on a dependency graph is how
+// the head of the longest chain ends up behind leaves that unblock nothing. The
+// wait lands on the run's makespan one for one, and no edge on the graph can
+// draw it.
+func TestSchedulerGivesAFreedSlotToTheHeaviestWaiter(t *testing.T) {
+	s := NewSubagentScheduler(1, 1)
+	held, err := s.Acquire(context.Background(), AcquireRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	granted := make(chan int, 2)
+	var wg sync.WaitGroup
+	// Queue the leaf first so arrival order and weight disagree.
+	for i, priority := range []int{0, 4} {
+		wg.Go(func() {
+			release, err := s.Acquire(context.Background(), AcquireRequest{Priority: priority})
+			if err != nil {
+				t.Errorf("acquire priority %d: %v", priority, err)
+				return
+			}
+			granted <- priority
+			release()
+		})
+		waitForQueuedAcquires(t, s, i+1)
+	}
+
+	held()
+	wg.Wait()
+	close(granted)
+	var order []int
+	for p := range granted {
+		order = append(order, p)
+	}
+	if want := []int{4, 0}; !slices.Equal(order, want) {
+		t.Fatalf("slots went out in priority order %v, want %v", order, want)
+	}
+}
+
+// "Queued" is one word for three constraints with two different remedies: a
+// ceiling is a session setting, a claim is a path or an edge. The scheduler was
+// the only thing that could tell them apart and it answered in a sentence, so
+// nothing downstream could — a run waiting on a claim was priced as one waiting
+// on a ceiling nobody needed to raise.
+func TestQueuedAcquireSaysWhichConstraintHeldIt(t *testing.T) {
+	root := testenv.TempDir(t)
+	mine, err := NormalizeWritePaths(root, []string{"a.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := NormalizeWritePaths(root, []string{"b.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		total, writers int
+		holder, queued AcquireRequest
+		want           agentgraph.WaitCause
+	}{
+		"the session ran out of slots": {
+			total: 1, writers: 1,
+			holder: AcquireRequest{}, queued: AcquireRequest{},
+			want: agentgraph.WaitSlots,
+		},
+		"a writer waits on the writer ceiling": {
+			total: 4, writers: 1,
+			holder: AcquireRequest{Writer: true, WritePaths: mine},
+			queued: AcquireRequest{Writer: true, WritePaths: theirs},
+			want:   agentgraph.WaitWriters,
+		},
+		"a writer waits on a path someone holds": {
+			total: 4, writers: 4,
+			holder: AcquireRequest{Writer: true, WritePaths: mine},
+			queued: AcquireRequest{Writer: true, WritePaths: mine},
+			want:   agentgraph.WaitClaim,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := NewSubagentScheduler(tc.total, tc.writers)
+			held, err := s.Acquire(context.Background(), tc.holder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			causes := make(chan agentgraph.WaitCause, 1)
+			req := tc.queued
+			req.OnQueued = func(h Held) error { causes <- h.Cause; return nil }
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				release, aerr := s.Acquire(context.Background(), req)
+				if aerr == nil {
+					release()
+				}
+			})
+			select {
+			case got := <-causes:
+				if got != tc.want {
+					t.Errorf("queued on %q, want %q", got, tc.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the acquire queued without saying what held it")
+			}
+			held()
+			wg.Wait()
+		})
+	}
+}
+
+// A request held back by a write claim learns whose claim it is and whether the
+// conflict is the two whole-workspace claims that neither writer chose to
+// narrow, because those are the cases with different remedies.
+func TestSchedulerNamesWhoseClaimHeldARequestBack(t *testing.T) {
+	root := testenv.TempDir(t)
+	whole, err := WholeWorkspaceWriteClaim(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, err := NormalizeWritePaths(root, []string{"a.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		holder, queued AcquireRequest
+		want           Held
+	}{
+		"two writers that declared nothing": {
+			holder: AcquireRequest{Writer: true, WritePaths: whole, Label: "refactor parser"},
+			queued: AcquireRequest{Writer: true, WritePaths: whole},
+			want:   Held{Cause: agentgraph.WaitClaim, By: "refactor parser", Whole: true},
+		},
+		"a declared path held by another": {
+			holder: AcquireRequest{Writer: true, WritePaths: mine, Label: "edit docs"},
+			queued: AcquireRequest{Writer: true, WritePaths: mine},
+			want:   Held{Cause: agentgraph.WaitClaim, By: "edit docs"},
+		},
+		"a whole-workspace claim in the way of a declared one": {
+			holder: AcquireRequest{Writer: true, WritePaths: whole, Label: "refactor parser"},
+			queued: AcquireRequest{Writer: true, WritePaths: mine},
+			want:   Held{Cause: agentgraph.WaitClaim, By: "refactor parser"},
+		},
+		"a holder with no label": {
+			holder: AcquireRequest{Writer: true, WritePaths: mine},
+			queued: AcquireRequest{Writer: true, WritePaths: mine},
+			want:   Held{Cause: agentgraph.WaitClaim},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := NewSubagentScheduler(4, 4)
+			held, err := s.Acquire(context.Background(), tc.holder)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make(chan Held, 1)
+			req := tc.queued
+			req.OnQueued = func(h Held) error { got <- h; return nil }
+			var wg sync.WaitGroup
+			wg.Go(func() {
+				if release, aerr := s.Acquire(context.Background(), req); aerr == nil {
+					release()
+				}
+			})
+			select {
+			case h := <-got:
+				if h != tc.want {
+					t.Errorf("held = %+v, want %+v", h, tc.want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the acquire queued without saying what held it")
+			}
+			held()
+			wg.Wait()
+		})
+	}
+}
+
+func TestOptimisticWriterLeavesTheParentFreeToWriteElsewhere(t *testing.T) {
+	root := t.TempDir()
+	s := NewSubagentScheduler(4, 2)
+	optimistic, _ := OptimisticWorkspaceClaim(root)
+	release, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: optimistic, Label: "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	a, _ := NormalizeWritePaths(root, []string{"a.txt"})
+	free, err := s.ReserveWrite(a)
+	if err != nil {
+		t.Fatalf("the parent could not write while an optimistic sub-agent ran: %v", err)
+	}
+	free()
+}
+
+func TestStrictWholeWorkspaceWriterStillBlocksTheParent(t *testing.T) {
+	root := t.TempDir()
+	s := NewSubagentScheduler(4, 2)
+	whole, _ := WholeWorkspaceWriteClaim(root)
+	release, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: whole, Label: "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	a, _ := NormalizeWritePaths(root, []string{"a.txt"})
+	if _, err := s.ReserveWrite(a); !errors.Is(err, ErrWritePathBusy) {
+		t.Fatalf("err = %v, want a typed busy refusal", err)
+	}
+}
+
+func TestTwoWritesToOnePathCollideWithATypedRefusalAndNothingElseDoes(t *testing.T) {
+	root := t.TempDir()
+	s := NewSubagentScheduler(4, 2)
+	a, _ := NormalizeWritePaths(root, []string{"a.txt"})
+	b, _ := NormalizeWritePaths(root, []string{"b.txt"})
+	first, err := s.ReserveWrite(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReserveWrite(a); !errors.Is(err, ErrWritePathBusy) {
+		t.Fatalf("same path: err = %v, want ErrWritePathBusy", err)
+	}
+	other, err := s.ReserveWrite(b)
+	if err != nil {
+		t.Fatalf("a different path was refused: %v", err)
+	}
+	other()
+	first()
+	again, err := s.ReserveWrite(a)
+	if err != nil {
+		t.Fatalf("the path stayed reserved after release: %v", err)
+	}
+	again()
+}
+
+func TestOptimisticWriteStillRespectsADeclaredClaimBesideIt(t *testing.T) {
+	root := t.TempDir()
+	s := NewSubagentScheduler(4, 3)
+	declared, _ := NormalizeWritePaths(root, []string{"owned"})
+	releaseDeclared, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: declared, Label: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseDeclared()
+	optimistic, _ := OptimisticWorkspaceClaim(root)
+	releaseOptimistic, err := s.Acquire(t.Context(), AcquireRequest{Writer: true, WritePaths: optimistic, Label: "free"})
+	if err != nil {
+		t.Fatalf("an optimistic writer should start beside a declared one: %v", err)
+	}
+	defer releaseOptimistic()
+	inside, _ := NormalizeWritePaths(root, []string{"owned/x.txt"})
+	if _, err := s.ReserveWrite(inside); !errors.Is(err, ErrWritePathBusy) {
+		t.Fatalf("a write into another run's declared claim: err = %v, want a typed refusal", err)
+	}
+}
