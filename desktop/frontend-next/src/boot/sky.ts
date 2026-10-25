@@ -136,10 +136,10 @@ export class Sky {
     ] as const) {
       const half = core * 0.8 * spread;
       const g = ctx.createLinearGradient(p.x, p.y, ex, ey);
-      g.addColorStop(0, `rgba(255,248,230,${alpha})`);
-      g.addColorStop(0.1, `rgba(255,214,130,${0.8 * alpha})`);
-      g.addColorStop(0.45, `rgba(214,140,48,${0.28 * alpha})`);
-      g.addColorStop(1, "rgba(180,100,30,0)");
+      g.addColorStop(0, `rgba(244,247,255,${alpha})`);
+      g.addColorStop(0.1, `rgba(158,182,255,${0.85 * alpha})`);
+      g.addColorStop(0.45, `rgba(79,111,232,${0.3 * alpha})`);
+      g.addColorStop(1, "rgba(50,70,160,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.moveTo(p.x + nx * half, p.y + ny * half);
@@ -150,9 +150,9 @@ export class Sky {
     }
     const halo = core * 5;
     const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, halo);
-    glow.addColorStop(0, "rgba(255,255,250,1)");
-    glow.addColorStop(0.2, "rgba(255,228,170,.7)");
-    glow.addColorStop(1, "rgba(240,170,70,0)");
+    glow.addColorStop(0, "rgba(255,255,255,1)");
+    glow.addColorStop(0.2, "rgba(190,210,255,.75)");
+    glow.addColorStop(1, "rgba(79,111,232,0)");
     ctx.fillStyle = glow;
     ctx.beginPath();
     ctx.arc(p.x, p.y, halo, 0, Math.PI * 2);
@@ -169,10 +169,10 @@ export class Sky {
       const r = Math.min(w, h) * (0.22 + 0.12 * bloom);
       const g = ctx.createRadialGradient(impact.x, impact.y, 0, impact.x, impact.y, r);
       const a = 0.5 * (1 - bloom) ** 2;
-      g.addColorStop(0, `rgba(255,220,160,${a})`);
-      g.addColorStop(0.2, `rgba(255,208,140,${a * 0.5})`);
-      g.addColorStop(0.5, `rgba(255,196,120,${a * 0.14})`);
-      g.addColorStop(1, "rgba(255,190,110,0)");
+      g.addColorStop(0, `rgba(200,220,255,${a})`);
+      g.addColorStop(0.2, `rgba(158,182,255,${a * 0.5})`);
+      g.addColorStop(0.5, `rgba(79,111,232,${a * 0.16})`);
+      g.addColorStop(1, "rgba(79,111,232,0)");
       ctx.fillStyle = g;
       ctx.fillRect(impact.x - r, impact.y - r, r * 2, r * 2);
     }
@@ -184,9 +184,9 @@ export class Sky {
       ctx.translate(impact.x, impact.y);
       ctx.scale(1, 0.014);
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, reach);
-      g.addColorStop(0, `rgba(255,236,200,${0.9 * (1 - streak) ** 1.6})`);
-      g.addColorStop(0.35, `rgba(255,196,110,${0.35 * (1 - streak) ** 1.6})`);
-      g.addColorStop(1, "rgba(255,180,90,0)");
+      g.addColorStop(0, `rgba(244,247,255,${0.9 * (1 - streak) ** 1.6})`);
+      g.addColorStop(0.35, `rgba(158,182,255,${0.4 * (1 - streak) ** 1.6})`);
+      g.addColorStop(1, "rgba(79,111,232,0)");
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(0, 0, reach, 0, Math.PI * 2);
@@ -203,7 +203,7 @@ export class Sky {
       e.vx *= 0.985;
       e.life -= dt;
       const a = 0.8 * clamp(e.life / 500);
-      ctx.strokeStyle = `rgba(255,${170 + 60 * a},${90 + 60 * a},${a})`;
+      ctx.strokeStyle = `rgba(${140 + 80 * a},${160 + 70 * a},255,${a})`;
       ctx.lineWidth = 1.1;
       ctx.beginPath();
       ctx.moveTo(e.x, e.y);

@@ -1,0 +1,60 @@
+# Orbit · Cursor rules
+
+## Git commits
+
+遵循 [Conventional Commits](https://www.conventionalcommits.org/)，且 **subject / body 使用中文**。
+
+### 格式
+
+```
+<type>(<scope>): <中文简述>
+
+[可选中文正文]
+
+[可选 footer]
+```
+
+- `type`、`scope` 用英文；冒号后的简述与正文用中文
+- 专有名词、命令、路径、包名可保留原文
+- 仅在用户明确要求时才创建 commit；不要擅自提交
+
+### type
+
+| type | 用途 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | 缺陷修复 |
+| `refactor` | 重构（无行为变化） |
+| `perf` | 性能 |
+| `docs` | 文档 |
+| `test` | 测试 |
+| `build` | 构建 / 依赖 |
+| `ci` | CI |
+| `chore` | 杂项维护 |
+| `style` | 格式（不影响逻辑） |
+| `revert` | 回滚 |
+
+`scope` 可选、简短（如 `studio`、`boot`、`serve`）。破坏性变更在 type 后加 `!`，并在正文写 `BREAKING CHANGE:`。
+
+### 标题与正文
+
+- 简述用祈使语气，说「为什么 / 做什么」，尽量 ≤50 字符，硬上限 72，句末不加句号
+- 正文仅在需要说明动机、破坏性变更、迁移或关联 issue 时添加；按约 72 列换行
+- 关联 issue：`Closes #123` / `Refs #123`（可放 footer）
+
+### 示例
+
+```
+feat(studio): 统一 Orbit 品牌开屏动画
+
+将 boot 字标与流星配色改为轨道标与蓝系，
+与图标、字标保持一致。
+```
+
+```
+fix(boot): 修复开屏字标在深色主题下的对比度
+```
+
+```
+chore: 增加 Cursor 规则要求中文 Conventional Commits
+```

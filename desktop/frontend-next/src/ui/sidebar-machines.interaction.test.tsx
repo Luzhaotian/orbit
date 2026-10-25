@@ -21,7 +21,7 @@ function draw(navShown: boolean, onSettings = vi.fn()) {
       reloadRemotes={async () => {}} reloadRemoteTrees={async () => {}} readRemoteTree={async () => {}} reloadTree={async () => {}}
       adder={{ busy: false, add: noop, addPath: noop } as never} onOpen={async () => {}} onOpenRemote={async () => {}} onFocusPane={noop} onClosePanes={async () => {}}
       onPause={noop} onArchive={async () => {}} onRename={noop} onCollapse={noop} account={null} accountUnread="" wallet=""
-      onSettings={onSettings} onFeedback={noop} feedbackUnread={0} onFind={noop} onError={noop}
+      onSettings={onSettings} onFind={noop} onError={noop}
     />,
   );
 }

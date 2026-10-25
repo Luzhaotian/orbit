@@ -1,5 +1,4 @@
 import { t } from "../i18n";
-import { FeedbackBadge } from "./feedbackentry";
 import { ICON, type Section } from "./prefsnav";
 import { StudioIcon } from "./StudioIcon";
 import { UpdateDot } from "./UpdateDot";
@@ -33,15 +32,13 @@ interface Props {
   /** The conversation item already shows the conversation, so pressing it again
    *  does what the rail beside it can: open or close the workspace column. */
   onRail: () => void;
-  onFeedback: () => void;
   /** A new session in the window's folder, the same action as the sidebar's. */
   onNew: () => void;
-  feedbackUnread: number;
   /** False keeps the column mounted but out of the way and out of reach. */
   shown: boolean;
 }
 
-export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feedbackUnread, shown }: Props) {
+export function Nav({ at, onGo, onFiles, onHome, onRail, onNew, shown }: Props) {
   const btn = ([key, label, sec, action]: [Mark, string, string | null, string?]) => (
     <button
       key={key}
@@ -68,11 +65,6 @@ export function Nav({ at, onGo, onFiles, onHome, onRail, onFeedback, onNew, feed
         {TO.map(btn)}
       </div>
       <div className="navgrp foot">
-        <button className="navbtn" data-action="feedback.open" onClick={onFeedback}>
-          <StudioIcon name="feedback" aria-hidden="true" />
-          <span className="navhint" role="tooltip">{t("发送反馈")}</span>
-          <FeedbackBadge unread={feedbackUnread} />
-        </button>
         {FOOT.map(btn)}
       </div>
     </nav>

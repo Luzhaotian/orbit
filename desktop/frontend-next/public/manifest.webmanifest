@@ -1,7 +1,7 @@
 {
-  "name": "Reasonix Studio",
-  "short_name": "Reasonix",
-  "description": "Control Reasonix Studio from this device",
+  "name": "Orbit Studio",
+  "short_name": "Orbit",
+  "description": "Control Orbit Studio from this device",
   "id": "./",
   "start_url": "./",
   "scope": "./",

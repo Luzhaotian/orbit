@@ -1,4 +1,3 @@
-import { FeedbackBadge, feedbackEntryTab } from "./feedbackentry";
 import { useEffect, useMemo, useState } from "react";
 import { t } from "../i18n";
 import logoWordmark from "../assets/logo-wordmark.svg";
@@ -72,9 +71,6 @@ interface Props {
   onFiles: () => void;
   onView: (to: PaneView) => void;
   onReferenceSession?: (id: string, title: string) => void;
-  onFeedback: (tab?: "send" | "mine") => void;
-  // Reports with a new reply or a question waiting; the entry and the palette say so.
-  feedbackUnread: number;
   onFind: () => void;
   onError: (e: unknown) => void;
 }
@@ -125,8 +121,6 @@ export function Sidebar({
   onFiles,
   onView,
   onReferenceSession,
-  onFeedback,
-  feedbackUnread,
   onFind,
   onError,
 }: Props) {
@@ -193,16 +187,12 @@ export function Sidebar({
         run: () => onSettings("providers") },
       { id: "usage", label: t("钱包与用量"), icon: "wallet", keywords: "usage cost token 用量 费用",
         run: () => onSettings("usage") },
-      { id: "feedback", label: t("发送反馈"), icon: "feedback", keywords: "feedback report bug idea suggestion 反馈 报告 问题 建议 意见",
-        run: () => onFeedback("send") },
-      { id: "feedback-mine", label: t("我的反馈"), icon: "feedback", keywords: "feedback receipt status my reply 反馈 回执 进展 我的 回复",
-        status: feedbackUnread > 0 ? t("{n} 项待查看", { n: feedbackUnread }) : undefined, run: () => onFeedback("mine") },
       { id: "community", label: t("上游项目"), icon: "globe", keywords: "upstream fork github 上游 二开",
         run: () => onSettings("versions:community") },
       { id: "settings", label: t("设置"), icon: "settings", keywords: "settings preferences 设置 偏好",
         run: () => onSettings() },
     ],
-    [newSessionRoot, onNew, onOpen, onOpenRemote, runtimes, active, onFiles, onView, onSettings, onFeedback, feedbackUnread, onFind, onError],
+    [newSessionRoot, onNew, onOpen, onOpenRemote, runtimes, active, onFiles, onView, onSettings, onFind, onError],
   );
 
   const onFold = (root: string, shut: boolean) =>
@@ -348,11 +338,6 @@ export function Sidebar({
       )}
       {!navShown && <div className="railfoot">
         <button className="studio-wallet" data-action="settings.section" data-value="usage" onClick={() => onSettings("usage")}><span aria-hidden="true"><StudioIcon name="wallet" /></span><b>{t("钱包与用量")}</b>{wallet && <small>{hideAmounts ? MASK : wallet}</small>}</button>
-        <button className="studio-wallet studio-feedback" data-action="feedback.open" onClick={() => onFeedback(feedbackEntryTab(feedbackUnread))}>
-          <span aria-hidden="true"><StudioIcon name="feedback" /></span>
-          <b>{t("发送反馈")}</b>
-          <FeedbackBadge unread={feedbackUnread} />
-        </button>
         <div className="studio-user-foot">
           <AccountRow account={account} unread={accountUnread} onOpen={() => onSettings("account")} />
           <span className="studio-workspace-kind">{t(account?.signedIn ? "个人工作空间" : "本地工作空间")}</span>

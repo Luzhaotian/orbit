@@ -18,7 +18,6 @@ import { useFirstRunRead, useLaunchHealth } from "./launchhealth";
 import { Nav } from "./Nav";
 import { useTreeWindow, type TreePaging } from "./treewindow";
 import { useNavRail } from "./navrail";
-import { feedbackEntryTab } from "./feedbackentry";
 import { ErrorBar } from "./ErrorBar";
 import { noteFault } from "./fault";
 import { ToastStack } from "./ToastStack";
@@ -585,12 +584,10 @@ export function App({ hub }: { hub: HubPort }) {
             onFiles={openFiles}
             onHome={hidePrefs}
             onRail={() => setRail((v) => !v)}
-            onFeedback={() => setFeedback(feedbackEntryTab(feedbackUnread))}
             onNew={() => {
               hidePrefs();
               void startConversation().catch(fail);
             }}
-            feedbackUnread={feedbackUnread}
             shown={navRail.shown}
           />
         )}
@@ -636,8 +633,6 @@ export function App({ hub }: { hub: HubPort }) {
           onFiles={openFiles}
           onView={showView}
           onReferenceSession={panePorts.has(active) ? referenceSession : undefined}
-          onFeedback={(tab) => setFeedback(tab ?? "send")}
-          feedbackUnread={feedbackUnread}
           onFind={find.open}
           onError={fail}
         />

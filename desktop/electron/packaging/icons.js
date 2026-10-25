@@ -85,7 +85,10 @@ async function main() {
     }
     const markSvg = svg
       .replace(/<rect [^>]*\/>\s*/g, "")
-      .replace('fill="url(#gold)"', 'fill="#000"')
+      .replace(/fill="url\(#glow\)"[^/]*\/>\s*/g, "")
+      .replace(/fill="url\(#gold\)"/g, 'fill="#000"')
+      .replace(/stroke="url\(#gold\)"/g, 'stroke="#000"')
+      .replace(/fill="#f8fbff"/g, 'fill="#000"')
       .replace('viewBox="0 0 1024 1024"', TEMPLATE_VIEWBOX);
     for (const [size, suffix] of TEMPLATE_SCALES) {
       fs.writeFileSync(path.join(ASSETS, `trayTemplate${suffix}.png`), await render(page, markSvg, size));

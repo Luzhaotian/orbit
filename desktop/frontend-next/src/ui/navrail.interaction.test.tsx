@@ -71,7 +71,7 @@ it("always draws the rail by default, with every entry in it", async () => {
   expect(nav()).not.toBeNull();
   expect(app().dataset.nav).toBe("on");
   expect(document.querySelector(".railfoot")).toBeNull();
-  for (const name of ["会话", "用量", "文件", "工具与权限", "扩展", "记忆", "远程", "发送反馈", "账号", "设置"]) {
+  for (const name of ["会话", "用量", "文件", "工具与权限", "扩展", "记忆", "远程", "账号", "设置"]) {
     expect(within(navEl()!).getByRole("button", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
   }
 });
@@ -144,7 +144,7 @@ it("still reaches settings with the rail off", async () => {
   await open();
   const footer = document.querySelector<HTMLElement>(".railfoot")!;
   expect(footer).not.toBeNull();
-  for (const name of ["钱包与用量", "发送反馈", "账号", "设置"]) {
+  for (const name of ["钱包与用量", "账号", "设置"]) {
     expect(within(footer).getByRole("button", { name: new RegExp(`^${name}`) }), name).toBeTruthy();
   }
   await openAppearance();
@@ -182,27 +182,6 @@ it("never draws the rail under the scene fold, in any state, and restores it aft
     await waitFor(() => expect(nav() !== null).toBe(mode !== "off"));
     expect(document.querySelector(".railfoot") !== null).toBe(mode === "off");
   }
-});
-
-it("opens feedback from the rail like the sidebar entry does, badge included", async () => {
-  const hub = new MockHub();
-  const build = hub.portFor.bind(hub);
-  const prepared = new WeakSet();
-  hub.portFor = (rt) => {
-    const port = build(rt);
-    if (!prepared.has(port)) {
-      prepared.add(port);
-      port.providerSetup = async () => null;
-      port.welcomeSeen = async () => true;
-    }
-    return port;
-  };
-  render(<App hub={hub} />);
-  await screen.findByRole("combobox", { name: "任务输入" });
-  const entry = await within(navEl()!).findByRole("button", { name: /发送反馈.*3 项待查看/ });
-  expect(entry.querySelector(".fbk-badge")?.textContent).toBe("3");
-  await userEvent.click(entry);
-  expect(await screen.findByRole("tab", { name: "我的反馈", selected: true })).toBeTruthy();
 });
 
 it("the conversation item opens and closes the workspace column, and from settings it goes home", async () => {

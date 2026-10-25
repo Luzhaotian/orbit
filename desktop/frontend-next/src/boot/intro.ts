@@ -3,7 +3,7 @@ import { shatter } from "./shards";
 
 const EASE = "cubic-bezier(.16, 1, .3, 1)";
 const SLAM = "cubic-bezier(.1, .85, .2, 1)";
-const LIT = "brightness(2.3) drop-shadow(0 0 10px rgba(255, 204, 128, .9))";
+const LIT = "brightness(2.3) drop-shadow(0 0 10px rgba(158, 182, 255, .9))";
 const SLIDE_MS = 650;
 const LETTER_MS = 480;
 const LETTER_GAP = 45;
@@ -23,7 +23,7 @@ export interface Intro {
 }
 
 /** Plays the boot screen: a meteor crosses, the view rushes at it, its impact
- *  slams the R together from shards, and the R unfolds into the wordmark,
+ *  slams the mark together from shards, and the mark unfolds into the wordmark,
  *  which holds under a moving glint for as long as the kernel keeps it waiting. */
 export function play(boot: HTMLElement | null): Intro {
   const svg = boot?.querySelector<SVGSVGElement>(".bmark");
@@ -113,7 +113,7 @@ export function play(boot: HTMLElement | null): Intro {
       }),
     );
     // Each letter unrolls from where the one before it stands, so the word
-    // ripples out of the R instead of every letter crossing the others.
+    // ripples out of the mark instead of every letter crossing the others.
     const rb = r.getBBox();
     const left = [rb.x + rb.width * 0.5];
     for (const el of rest) {

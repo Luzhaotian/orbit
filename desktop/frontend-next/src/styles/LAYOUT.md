@@ -1242,7 +1242,8 @@ A sub-agent row, by the list's own width:
 - Fixed dark, not following the app theme: it is a ceremony, not part of the
   interface. It plays once in a lifetime, any key skips it, and every animation
   leaves the brand visible when reduced motion disables it.
-- The welcome wordmark uses `logo-wordmark.svg` in its own blue with a steady
+- The welcome wordmark uses `logo-wordmark.svg` as an ink silhouette (dark theme
+  inverts it to white) with a steady
   glow. Its brief highlight changes the image filter; the Studio subtitle uses
   the shared display and title size tokens and the shipped mono face.
 - Sidebar and onboarding use the same 118 by 24 wordmark and stacked Studio
