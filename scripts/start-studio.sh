@@ -54,21 +54,16 @@ if [ ! -d "$frontend/node_modules" ]; then
   (cd "$frontend" && pnpm install --frozen-lockfile)
 fi
 
-if [ "${FORCE_REBUILD:-}" = "1" ] || [ ! -f "$frontend/dist/index.html" ]; then
-  echo "==> frontend"
-  (cd "$frontend" && pnpm build)
-else
-  echo "==> frontend (cached dist)"
-fi
+# Force clean rebuild so brand / UI source changes are never served from a stale dist.
+echo "==> frontend (clean)"
+rm -rf "$frontend/dist" "$frontend/node_modules/.vite"
+(cd "$frontend" && pnpm build)
 
 # Native arm64 host only — packaging uses a universal binary + CUA download.
-if [ "${FORCE_REBUILD:-}" = "1" ] || [ ! -x "$host_bin" ]; then
-  echo "==> kernel"
-  mkdir -p "$electron/bin"
-  (cd "$root" && CGO_ENABLED=0 go build -ldflags "-s -w" -o "$host_bin" ./cmd/reasonix-studio-host)
-else
-  echo "==> kernel (cached binary)"
-fi
+echo "==> kernel (clean)"
+mkdir -p "$electron/bin"
+rm -f "$host_bin"
+(cd "$root" && CGO_ENABLED=0 go build -ldflags "-s -w" -o "$host_bin" ./cmd/reasonix-studio-host)
 
 echo "==> studio"
 cd "$electron"
